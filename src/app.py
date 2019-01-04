@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 
 # Python Imports
+from datetime import datetime, timedelta
 from logging.config import dictConfig
 import argparse
+import atexit
 import logging
 import os
 import signal
 import sys
 
 # Third Party Imports
-from gpiozero import Button
+from gpiozero import DigitalInputDevice
 import requests
 
 # App Module Imports
@@ -21,11 +23,15 @@ class WaterSensorApp(Daemon):
 
     PID_FILE = "/tmp/water-sensor.pid"
 
+    HYSTERESIS = timedelta(hours=6)
+
     def __init__(self, stdin=os.devnull, stdout=os.devnull, stderr=os.devnull):
         super(WaterSensorApp, self).__init__(self.PID_FILE, stdin, stdout, stderr)
         self.__logger = logging.getLogger(type(self).__name__)
         self.__hub = ""
         self.__client_id = ""
+        self.__sensor = None
+        self.__last_alert = datetime.min
 
     def _run(self):
         if not self.__hub:
@@ -35,9 +41,7 @@ class WaterSensorApp(Daemon):
             self.__logger.error("Missing `client_id` configuration.")
             sys.exit(1)
 
-        self.__logger.info("Starting sensor")
-        water_sensor = Button(4, pull_up=True)
-        water_sensor.when_pressed = self.__handle_water_detected
+        self.__initialize()
         signal.pause()
 
     @property
@@ -58,7 +62,20 @@ class WaterSensorApp(Daemon):
 
     def __handle_water_detected(self):
         self.__logger.info("Detected water, alerting!")
-        requests.post(self.__hub, data={"client": self.__client_id})
+        now = datetime.now()
+        if (now - self.__last_alert) > self.HYSTERESIS:
+            self.__last_alert = now
+            requests.post(self.__hub, data={"client": self.__client_id})
+
+    def __initialize(self):
+        self.__logger.info("Starting sensor.")
+        self.__sensor = DigitalInputDevice(4, pull_up=True)
+        self.__sensor.when_activated = self.__handle_water_detected
+        atexit.register(self.__cleanup)
+
+    def __cleanup(self):
+        self.__logger.info("Stopping sensor.")
+        self.__sensor.close()
 
 
 if __name__ == "__main__":
