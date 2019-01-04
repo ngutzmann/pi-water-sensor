@@ -14,12 +14,21 @@ class Daemon(object):
     """
 
     def __init__(
-        self, pid_file, stdin="/dev/null", stderr="/dev/null", stdout="/dev/null"
+        self, pid_file, stdin=os.devnull, stderr=os.devnull, stdout=os.devnull
     ):
         self.__pid_file = pid_file
-        self.__stdin = stdin
-        self.__stderr = stderr
-        self.__stdout = stdout
+        if isinstance(stdin, str):
+            self.__stdin = open(stdin, "r")
+        else:
+            self.__stdin = stdin
+        if isinstance(stderr, str):
+            self.__stderr = open(stderr, "a+")
+        else:
+            self.__stderr = stderr
+        if isinstance(stdout, str):
+            self.__stdout = open(stdout, "a+")
+        else:
+            self.__stdout = stdout
 
     def _run(self):
         """This method should be overridden when you subclassing Daemon.
@@ -53,7 +62,10 @@ class Daemon(object):
 
         # Start the daemon
         self.__daemonize()
-        self._run()
+        try:
+            self._run()
+        except (KeyboardInterrupt, SystemExit):
+            sys.exit(0)
 
     def check(self):
         """Check if the daemon is running"""
@@ -134,13 +146,10 @@ class Daemon(object):
 
         sys.stdout.flush()
         sys.stderr.flush()
-        si = open(self.__stdin, "r")
-        so = open(self.__stdout, "a+")
-        se = open(self.__stderr, "a+")
 
-        os.dup2(si.fileno(), sys.stdin.fileno())
-        os.dup2(so.fileno(), sys.stdout.fileno())
-        os.dup2(se.fileno(), sys.stderr.fileno())
+        os.dup2(self.__stdin.fileno(), sys.stdin.fileno())
+        os.dup2(self.__stdout.fileno(), sys.stdout.fileno())
+        os.dup2(self.__stderr.fileno(), sys.stderr.fileno())
 
         atexit.register(self.__del_pid)
         pid = str(os.getpid())
